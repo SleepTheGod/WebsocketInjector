@@ -1,4 +1,5 @@
-![Screenshot](https://i.ibb.co/zTKRN8wt/Screenshot-2025-03-16-070115.png)
+![Screenshot-2025-03-16-070115](https://github.com/user-attachments/assets/ea97a89d-e126-458f-815b-3b11a4d13e4d)
+
 
 
 WebSocket Logger and Debugger
