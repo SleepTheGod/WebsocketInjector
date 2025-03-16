@@ -1,5 +1,6 @@
 ![Screenshot](https://i.ibb.co/zTKRN8wt/Screenshot-2025-03-16-070115.png)
 
+
 WebSocket Logger and Debugger
 Description
 This is an advanced WebSocket logger and debugger tool designed to capture and log all incoming and outgoing WebSocket traffic, as well as WebRTC signaling packets. It offers full flexibility for custom WebSocket command injection and includes features like
