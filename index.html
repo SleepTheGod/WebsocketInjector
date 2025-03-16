@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Logger & Debugger</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            margin: 0;
+            background-color: #212121;
+            color: #f0f0f0;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #00bcd4;
+        }
+        #wsInfo {
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #333;
+            background-color: #1e1e1e;
+            border-radius: 5px;
+        }
+        #messages {
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }
+        .message {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .received {
+            background-color: #004d40;
+        }
+        .sent {
+            background-color: #d32f2f;
+        }
+        #connectButton, #disconnectButton {
+            padding: 12px 20px;
+            margin: 10px 5px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+            border: none;
+        }
+        #disconnectButton {
+            background-color: #e57373;
+            color: white;
+        }
+        #connectButton {
+            background-color: #00796b;
+            color: white;
+        }
+        #commandInput {
+            width: 100%;
+            padding: 12px;
+            margin-top: 20px;
+            font-size: 16px;
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 5px;
+        }
+        #consoleOutput {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #000;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            min-height: 200px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border-radius: 5px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 14px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Logger & Debugger</h1>
+    <div id="wsInfo">
+        <label for="wsUrl">WebSocket URL:</label>
+        <input type="text" id="wsUrl" placeholder="wss://gateway.discord.gg" />
+        <button id="connectButton">Connect</button>
+        <button id="disconnectButton" disabled>Disconnect</button>
+        <p id="status">Status: Disconnected</p>
+    </div>
+
+    <div id="messages">
+        <h2>Messages</h2>
+        <div id="messageList"></div>
+    </div>
+
+    <div id="consoleOutput"></div>
+
+    <input type="text" id="commandInput" placeholder="Send any WebSocket message..." />
+
+    <div class="footer">
+        <p>Made by <strong>Clumsy</strong></p>
+    </div>
+
+    <script>
+        let ws;
+        let heartbeatInterval = null;
+        let sequenceNumber = 0;
+        let heartbeatTimer;
+        const connectButton = document.getElementById('connectButton');
+        const disconnectButton = document.getElementById('disconnectButton');
+        const statusText = document.getElementById('status');
+        const messageList = document.getElementById('messageList');
+        const wsUrlInput = document.getElementById('wsUrl');
+        const commandInput = document.getElementById('commandInput');
+        const consoleOutput = document.getElementById('consoleOutput');
+
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+
+        connectButton.addEventListener('click', () => {
+            const url = wsUrlInput.value;
+            if (!url) {
+                alert('Please enter a valid WebSocket URL');
+                return;
+            }
+            connectWebSocket(url);
+        });
+
+        disconnectButton.addEventListener('click', () => {
+            disconnectWebSocket();
+        });
+
+        commandInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                injectCommand(commandInput.value);
+                commandInput.value = ''; // Clear input after sending the message
+            }
+        });
+
+        function connectWebSocket(url) {
+            ws = new WebSocket(url);
+            ws.onopen = () => {
+                reconnectAttempts = 0;
+                statusText.textContent = 'Status: Connected';
+                connectButton.disabled = true;
+                disconnectButton.disabled = false;
+                logToConsole('WebSocket connected!');
+                startHeartbeat();
+            };
+            ws.onclose = () => {
+                statusText.textContent = 'Status: Disconnected';
+                connectButton.disabled = false;
+                disconnectButton.disabled = true;
+                logToConsole('WebSocket disconnected!');
+                stopHeartbeat();
+                handleReconnection(url);
+            };
+            ws.onerror = (error) => {
+                statusText.textContent = `Status: Error - ${error.message}`;
+                logToConsole(`WebSocket Error: ${error.message}`);
+            };
+            ws.onmessage = (event) => {
+                handleWebSocketMessage(event.data);
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            const message = JSON.parse(data);
+            logToConsole(`Received: ${JSON.stringify(message)}`);
+
+            if (message.op === 10) {
+                heartbeatInterval = message.d.heartbeat_interval;
+                logToConsole(`Heartbeat interval: ${heartbeatInterval}ms`);
+                startHeartbeat();
+            } else if (message.op === 11) {
+                logToConsole('Heartbeat acknowledged');
+            } else {
+                displayMessage(JSON.stringify(message), 'received');
+            }
+        }
+
+        function startHeartbeat() {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            heartbeatTimer = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const payload = { op: 1, d: sequenceNumber };
+                    ws.send(JSON.stringify(payload));
+                    logToConsole(`Sent heartbeat with sequence: ${sequenceNumber}`);
+                    sequenceNumber++;
+                }
+            }, heartbeatInterval);
+        }
+
+        function stopHeartbeat() {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+        }
+
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        function displayMessage(message, type) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', type);
+            messageElement.textContent = message;
+            messageList.appendChild(messageElement);
+            messageList.scrollTop = messageList.scrollHeight; // Scroll to the bottom
+        }
+
+        function sendMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+                displayMessage(message, 'sent');
+            } else {
+                logToConsole('WebSocket is not connected');
+            }
+        }
+
+        function injectCommand(command) {
+            logToConsole(`Command: ${command}`);
+            const args = command.split(' ');
+
+            if (args[0] === 'send' && args.length > 1) {
+                sendMessage(args.slice(1).join(' '));
+            } else if (args[0] === 'log') {
+                logToConsole(`Log: ${args.slice(1).join(' ')}`);
+            } else if (args[0] === 'help') {
+                showHelp();
+            } else if (args[0] === 'clear') {
+                clearMessages();
+            } else {
+                sendCustomMessage(command);
+            }
+        }
+
+        function sendCustomMessage(message) {
+            sendMessage(message);
+        }
+
+        function clearMessages() {
+            messageList.innerHTML = ''; // Clear the message list
+            logToConsole('Messages cleared.');
+        }
+
+        function showHelp() {
+            const helpText = `
+            Available commands:
+            - send <message> : Send a message to the WebSocket server.
+            - log <message>  : Log a custom message to the console.
+            - help            : Show this help message.
+            - clear           : Clear the messages displayed on the screen.
+            - <any message>    : Send any message to the WebSocket server (arbitrary message).
+            
+            Example:
+            send {"op":1,"d":12345}
+            log This is a custom log message
+            clear
+            `;
+            logToConsole(helpText);
+        }
+
+        function handleReconnection(url) {
+            if (reconnectAttempts < maxReconnectAttempts) {
+                logToConsole(`Attempting to reconnect... (${reconnectAttempts + 1})`);
+                setTimeout(() => {
+                    reconnectAttempts++;
+                    connectWebSocket(url);
+                }, 2000); // Reconnect after 2 seconds
+            } else {
+                logToConsole('Max reconnection attempts reached.');
+            }
+        }
+
+        function logToConsole(message) {
+            consoleOutput.textContent += `\n${message}`;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight; // Scroll to the bottom
+        }
+
+    </script>
+</body>
+</html>
